@@ -8,7 +8,7 @@ import (
 	"github.com/jmarcosnsf/gobid/internal/validator"
 )
 
-func EncondeJson[T any](w http.ResponseWriter, r *http.Request, data T, statusCode int) error {
+func EncondeJson[T any](w http.ResponseWriter, r *http.Request, statusCode int, data T) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(data); err != nil{
