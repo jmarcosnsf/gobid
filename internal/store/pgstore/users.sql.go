@@ -37,6 +37,37 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (uuid.UU
 	return id, err
 }
 
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, username, password_hash, email, bio, created_at, updated_at
+FROM users
+WHERE email = $1
+`
+
+type GetUserByEmailRow struct {
+	ID           uuid.UUID          `json:"id"`
+	Username     string             `json:"username"`
+	PasswordHash []byte             `json:"password_hash"`
+	Email        string             `json:"email"`
+	Bio          string             `json:"bio"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i GetUserByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Email,
+		&i.Bio,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserById = `-- name: GetUserById :one
 SELECT id, username, password_hash, email, bio, created_at, updated_at
 FROM users
