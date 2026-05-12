@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
@@ -10,13 +12,23 @@ import (
 
 type MessageKind int
 
-const(
+const (
+	// Requests
 	PlaceBid MessageKind = iota
+	// Ok/Success
+	SucessfullyPlacedBid
+	// Errors
+	FailedToPlaceBid
+	// Info
+	NewBidPlaced
+	AuctionFinished
 )
 
-type Message struct{
+type Message struct {
 	Message string
-	Kind int
+	Amount  float64
+	Kind    MessageKind
+	UserID  uuid.UUID
 }
 
 type AuctionLobby struct {
@@ -24,40 +36,103 @@ type AuctionLobby struct {
 	Rooms map[uuid.UUID]*AuctionRoom
 }
 
-type AuctionRoom struct{
-	Id uuid.UUID
-	Context context.Context
-	Broadcast chan Message
-	Register chan *Client
+type AuctionRoom struct {
+	Id         uuid.UUID
+	Context    context.Context
+	Broadcast  chan Message
+	Register   chan *Client
 	Unregister chan *Client
-	Clients map[uuid.UUID]*Client
+	Clients    map[uuid.UUID]*Client
 
 	BidsService *BidsService
 }
 
-func NewAuctionRoom(ctx context.Context, id uuid.UUID, bidsService BidsService) *AuctionRoom{
+func (r *AuctionRoom) registerClient(c *Client) {
+	slog.Info("New user connected", "Client: ", c)
+	r.Clients[c.UserId] = c
+}
+
+func (r *AuctionRoom) unregisterClient(c *Client) {
+	slog.Info("User disconnected", "Client: ", c)
+	delete(r.Clients, c.UserId)
+}
+
+func (r *AuctionRoom) broadcastMessage(m Message) {
+	slog.Info("New message recieved", "RoomID", r.Id, "message", m.Message, "user_id", m.UserID)
+	switch m.Kind {
+	case (PlaceBid):
+		bid, err := r.BidsService.PlaceBid(r.Context, r.Id, m.UserID, m.Amount)
+		if err != nil {
+			if errors.Is(err, ErrBidIsTooLow) {
+				if client, ok := r.Clients[m.UserID]; ok {
+					client.Send <- Message{Kind: FailedToPlaceBid, Message: ErrBidIsTooLow.Error()}
+				}
+				return
+			}
+		}
+		if client, ok := r.Clients[m.UserID]; ok {
+			client.Send <- Message{Kind: SucessfullyPlacedBid, Message: "Your bid was sucessfully placed"}
+		}
+
+		for id, client := range r.Clients {
+			newBidMessage := Message{Kind: NewBidPlaced, Message: "A new bid has been placed", Amount: bid.BidAmount}
+			if id == m.UserID {
+				continue
+			}
+			client.Send <- newBidMessage
+		}
+	}
+
+}
+func (r *AuctionRoom) Run() {
+	slog.Info("Auction has begun", "auctionID", r.Id)
+	defer func() {
+		close(r.Broadcast)
+		close(r.Register)
+		close(r.Unregister)
+	}()
+
+	for {
+		select {
+		case client := <-r.Register:
+			r.registerClient(client)
+		case client := <-r.Unregister:
+			r.unregisterClient(client)
+		case message := <-r.Broadcast:
+			r.broadcastMessage(message)
+		case <-r.Context.Done():
+			slog.Info("Auction has ended.", "auctionID", r.Id)
+			for _, client := range r.Clients {
+				client.Send <- Message{Kind: AuctionFinished, Message: "auction has been finished"}
+			}
+			return
+		}
+	}
+}
+func NewAuctionRoom(ctx context.Context, id uuid.UUID, bidsService BidsService) *AuctionRoom {
 	return &AuctionRoom{
-		Id: id,
-		Broadcast: make(chan Message),
-		Register: make(chan *Client),
-		Unregister: make(chan *Client),
-		Context: ctx,
+		Id:          id,
+		Broadcast:   make(chan Message),
+		Register:    make(chan *Client),
+		Unregister:  make(chan *Client),
+		Clients:     make(map[uuid.UUID]*Client),
+		Context:     ctx,
 		BidsService: &bidsService,
 	}
 }
 
 type Client struct {
-	Room *AuctionRoom
-	Conn *websocket.Conn
-	Send chan Message
+	Room   *AuctionRoom
+	Conn   *websocket.Conn
+	Send   chan Message
 	UserId uuid.UUID
 }
 
 func NewClient(room *AuctionRoom, conn *websocket.Conn, userId uuid.UUID) *Client {
 	return &Client{
-		Room: room,
-		Conn: conn,
-		Send: make(chan Message, 512),
+		Room:   room,
+		Conn:   conn,
+		Send:   make(chan Message, 512),
 		UserId: userId,
 	}
 }
