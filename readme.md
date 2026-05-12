@@ -74,8 +74,8 @@ Place a bid:
 
 ## Roadmap
 
+- Prevent sellers from bidding on their own products
+- Product listing endpoint with pagination
+- Endpoint to fetch an auction's winner (currently only available via WebSocket)
+- Broadcast the winner over WebSocket when the auction closes
 - CSRF protection (scaffolded with `gorilla/csrf`, not yet wired)
-- Distributed WebSockets via Redis pub/sub for multi-instance deploys
-- Bid concurrency safety with `SELECT ... FOR UPDATE`
-- Product listing endpoints + bid history
-- Tests (unit + integration with testcontainers)
