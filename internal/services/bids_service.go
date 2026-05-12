@@ -11,13 +11,13 @@ import (
 )
 
 type BidsService struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
 	queries *pgstore.Queries
 }
 
-func NewBidsService(pool *pgxpool.Pool) BidsService{
+func NewBidsService(pool *pgxpool.Pool) BidsService {
 	return BidsService{
-		pool: pool,
+		pool:    pool,
 		queries: pgstore.New(pool),
 	}
 }
@@ -42,6 +42,7 @@ func (bs *BidsService) PlaceBid(ctx context.Context, productID, bidderID uuid.UU
 		return pgstore.Bid{}, ErrBidIsTooLow
 	}
 
+	
 	bid, err := bs.queries.CreateBid(ctx, pgstore.CreateBidParams{
 		ProductID: productID,
 		BidderID:  bidderID,
