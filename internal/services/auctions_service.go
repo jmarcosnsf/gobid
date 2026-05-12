@@ -27,10 +27,10 @@ const (
 )
 
 type Message struct {
-	Message string `json:"message,omitempty"`
-	Amount  float64 `json:"amount,omitempty"`
+	Message string      `json:"message,omitempty"`
+	Amount  float64     `json:"amount,omitempty"`
 	Kind    MessageKind `json:"kind"`
-	UserID  uuid.UUID `json:"user_id,omitempty"`
+	UserID  uuid.UUID   `json:"user_id,omitempty"`
 }
 
 type AuctionLobby struct {
@@ -71,7 +71,14 @@ func (r *AuctionRoom) broadcastMessage(m Message) {
 				}
 				return
 			}
+
+			slog.Error("failed to place bid", "error", err)
+			if client, ok := r.Clients[m.UserID]; ok {
+				client.Send <- Message{Kind: FailedToPlaceBid, Message: "failed to place bid", UserID: m.UserID}
+			}
+			return
 		}
+
 		if client, ok := r.Clients[m.UserID]; ok {
 			client.Send <- Message{Kind: SucessfullyPlacedBid, Message: "Your bid was sucessfully placed", UserID: m.UserID}
 		}
@@ -145,22 +152,23 @@ func NewClient(room *AuctionRoom, conn *websocket.Conn, userId uuid.UUID) *Clien
 		UserId: userId,
 	}
 }
+
 const (
 	maxMessageSize = 512
-	readDeadLine = 60 * time.Second
-	writeWait = 10 * time.Second
-	pingPeriod = (readDeadLine * 9)/10
-	
+	readDeadLine   = 60 * time.Second
+	writeWait      = 10 * time.Second
+	pingPeriod     = (readDeadLine * 9) / 10
 )
-func (c *Client) ReadEventLoop(){
-	defer func(){
+
+func (c *Client) ReadEventLoop() {
+	defer func() {
 		c.Room.Unregister <- c
 		c.Conn.Close()
 	}()
 
 	c.Conn.SetReadLimit(maxMessageSize)
 	c.Conn.SetReadDeadline(time.Now().Add(readDeadLine))
-	c.Conn.SetPongHandler(func(string) error{
+	c.Conn.SetPongHandler(func(string) error {
 		c.Conn.SetReadDeadline(time.Now().Add(readDeadLine))
 		return nil
 	})
@@ -168,16 +176,16 @@ func (c *Client) ReadEventLoop(){
 	for {
 		var m Message
 		m.UserID = c.UserId
-		if err := c.Conn.ReadJSON(&m); err != nil{
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure){
+		if err := c.Conn.ReadJSON(&m); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				slog.Error("Unexpected close error", "error", err)
 				return
 			}
 
 			c.Room.Broadcast <- Message{
-				Kind: InvalidJSON,
+				Kind:    InvalidJSON,
 				Message: "this message should be a valid json",
-				UserID: m.UserID,
+				UserID:  m.UserID,
 			}
 			continue
 		}
@@ -186,25 +194,25 @@ func (c *Client) ReadEventLoop(){
 	}
 }
 
-func (c *Client) WriteEventLoop(){
+func (c *Client) WriteEventLoop() {
 	ticker := time.NewTicker(pingPeriod)
-	defer func(){
+	defer func() {
 		ticker.Stop()
 		c.Conn.Close()
 	}()
 
 	for {
-		select{
-		case message, ok := <- c.Send:
+		select {
+		case message, ok := <-c.Send:
 			if !ok {
 				c.Conn.WriteJSON(Message{
-					Kind: websocket.CloseMessage,
+					Kind:    websocket.CloseMessage,
 					Message: "closing websocket connection",
 				})
 				return
 			}
 
-			if message.Kind == AuctionFinished{
+			if message.Kind == AuctionFinished {
 				close(c.Send)
 				return
 			}
@@ -215,8 +223,7 @@ func (c *Client) WriteEventLoop(){
 				return
 			}
 
-
-		case <- ticker.C:
+		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				slog.Error("Unexpected write error", "error", err)
